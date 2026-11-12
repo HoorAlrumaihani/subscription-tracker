@@ -201,3 +201,29 @@ All errors flow through a centralized `error.middlewares.js`, returning consiste
 3. Commit your changes: `git commit -m "Add your feature"`
 4. Push to the branch: `git push origin feature/your-feature`
 5. Open a Pull Request
+
+## Run with Docker
+
+1. Create `.env.docker.local` with the app variables. Values must be written without quotes, and the database URI must use the container name:
+
+```
+DB_URI=mongodb://dbMongo:27017/subscription-tracker
+```
+
+2. Build and run:
+
+```bash
+docker build -t subscription-tracker .
+docker network create firstNetwork
+docker volume create mongo-data
+docker run -d --name dbMongo --network firstNetwork -v mongo-data:/data/db mongo:7 --replSet rs0
+docker exec dbMongo mongosh --eval "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'dbMongo:27017'}]})"
+docker run -d --name myApp --network firstNetwork --env-file .env.docker.local -p 5500:5500 subscription-tracker
+```
+
+## Problems I solved
+
+### PROBLEM_TITLE
+- **Problem:**replica set
+- **Cause:**production env have to be same with contanir
+- **Fix:**--replSet rs0
