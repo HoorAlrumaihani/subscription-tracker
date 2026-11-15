@@ -1,0 +1,24 @@
+services:
+  dbMongo:
+    image: mongo:7
+    container_name: dbMongo
+    networks:
+      - firstNetwork
+    volumes:
+      - mongo-data:/data/db
+    command: mongod --replSet rs0 
+  myApp:
+    build: .
+    image: subscription-tracker
+    container_name: myApp
+    networks:
+      - firstNetwork
+    ports:
+      - "5500:5500"
+    env_file: .env.docker.local
+networks:
+  firstNetwork:
+
+volumes:
+  mongo-data:
+
