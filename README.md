@@ -71,7 +71,7 @@ subscription-tracker/
 ### Installation
 
 ```bash
-git clone https://github.com/HoorAlrumihani/subscription-tracker.git
+git clone https://github.com/HoorAlrumaihani/subscription-tracker.git
 cd subscription-tracker
 npm install
 ```
@@ -204,13 +204,45 @@ All errors flow through a centralized `error.middlewares.js`, returning consiste
 
 ## Run with Docker
 
-1. Create `.env.docker.local` with the app variables. Values must be written without quotes, and the database URI must use the container name:
+### 1. Create the environment file
+
+Create `.env.docker.local` in the project root with the app variables. Write values **without quotes**, and point the database URI at the Mongo container name instead of `localhost`:
 
 ```
 DB_URI=mongodb://dbMongo:27017/subscription-tracker
 ```
 
-2. Build and run:
+### 2. Option A: Docker Compose (recommended)
+
+`compose.yaml` defines both containers (`myApp` and `dbMongo`), a private network, and a named volume for the database.
+
+```bash
+# Start everything in the background
+docker compose up -d
+
+# First run only: turn MongoDB into a replica set (needed for transactions)
+docker compose exec dbMongo mongosh --eval "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'dbMongo:27017'}]})"
+
+# First run only: start the app again if it exited before the replica set was ready
+docker compose up -d
+
+# Check status and logs
+docker compose ps
+docker compose logs myApp --tail 20
+```
+
+Useful commands:
+
+```bash
+docker compose up -d --build   # rebuild the app image after code changes
+docker compose down            # stop and remove containers and network (data volume is kept)
+```
+
+> **Note:** Compose prefixes network and volume names with the project name, e.g. `subscription-tracker_mongo-data`. The replica set config is saved inside that volume, so `rs.initiate` is needed only once.
+
+### 3. Option B: Manual Docker commands
+
+The same setup without Compose:
 
 ```bash
 docker build -t subscription-tracker .
@@ -221,9 +253,38 @@ docker exec dbMongo mongosh --eval "rs.initiate({_id: 'rs0', members: [{_id: 0, 
 docker run -d --name myApp --network firstNetwork --env-file .env.docker.local -p 5500:5500 subscription-tracker
 ```
 
+Only the app publishes a port (`5500`). MongoDB stays reachable only from inside the private network.
+
 ## Problems I solved
 
-### PROBLEM_TITLE
-- **Problem:**replica set
-- **Cause:**production env have to be same with contanir
-- **Fix:**--replSet rs0
+### 1. Transactions failed inside the container
+- **Problem:** Sign-up failed because it uses a MongoDB transaction.
+- **Cause:** MongoDB allows transactions only on a replica set. MongoDB Atlas sets this up automatically, but a plain `mongo` container runs as a standalone server.
+- **Fix:** Run Mongo with `--replSet rs0`, then initialize it once with `rs.initiate`.
+- **Lesson:** The local environment should match production as closely as possible.
+
+### 2. `JWT_EXPIRES_IN` was rejected
+- **Problem:** The app rejected the token expiry value.
+- **Cause:** Docker's `--env-file` does not strip quotes like `dotenv` does, so the value arrived as `"1d"` with the quotes included.
+- **Fix:** Removed quotes from all values in `.env.docker.local`.
+
+### 3. Data was lost when the Mongo container was removed
+- **Problem:** Registered users disappeared after deleting and recreating the database container.
+- **Cause:** Without a volume, data lives in the container's writable layer and is deleted with it.
+- **Fix:** Mounted a named volume on `/data/db`. The replica set config survives too, since it is stored in the same folder.
+
+### 4. Naming mistakes that almost leaked secrets
+- **Problem:** Docker could not find the build file, and an env file was about to be pushed to GitHub.
+- **Cause:** The file must be named exactly `Dockerfile`, and a typo (`.evn`) did not match the `.env*` rule in `.gitignore`.
+- **Fix:** Renamed both files and checked `git status` before every commit.
+
+### 5. Arcjet blocked `curl` requests
+- **Problem:** Testing the API with `curl` returned a blocked response.
+- **Cause:** Arcjet's bot protection identifies `curl` from its User-Agent header.
+- **Fix:** Sent a browser User-Agent while testing: `curl -A "Mozilla/5.0" ...`
+
+### 6. The app exited on the first `docker compose up`
+- **Problem:** After `docker compose up -d`, only `dbMongo` was running. The logs showed `MongooseServerSelectionError: Server selection timed out after 30000 ms`.
+- **Cause:** Compose started both containers at the same time. Mongo was running, but the replica set was not initialized yet, so the app found no primary server, gave up after 30 seconds, and exited. A container stops when its main process stops.
+- **Fix:** Initialized the replica set, then ran `docker compose up -d` again, which starts only the stopped service.
+- **Next step:** Add a health check and a restart policy so the app waits for the database or restarts automatically.
