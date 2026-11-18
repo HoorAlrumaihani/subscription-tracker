@@ -6,7 +6,12 @@ services:
       - firstNetwork
     volumes:
       - mongo-data:/data/db
-    command: mongod --replSet rs0 
+    command: mongod --replSet rs0
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   myApp:
     build: .
     image: subscription-tracker
@@ -16,6 +21,9 @@ services:
     ports:
       - "5500:5500"
     env_file: .env.docker.local
+    depends_on:
+      dbMongo: 
+        condition: service_healthy
 networks:
   firstNetwork:
 
